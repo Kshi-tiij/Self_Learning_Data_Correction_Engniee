@@ -5,7 +5,14 @@ import numpy as np
 import pandas as pd
 import logging
 from typing import Dict, List, Tuple, Any, Optional
-import shap
+
+try:
+    import shap
+    SHAP_AVAILABLE = True
+except ImportError:
+    shap = None
+    SHAP_AVAILABLE = False
+    
 from sklearn.preprocessing import StandardScaler
 import warnings
 
@@ -29,6 +36,11 @@ class SHAPExplainer:
     
     def _initialize_explainer(self) -> None:
         """Initialize SHAP explainer based on model type"""
+        if not SHAP_AVAILABLE:
+            logger.warning("SHAP library is not installed. SHAPExplainer won't be functional.")
+            self.fitted = False
+            return
+            
         try:
             # Use TreeExplainer for tree-based models
             if hasattr(self.model, 'feature_importances_'):

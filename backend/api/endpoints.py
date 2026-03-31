@@ -3,7 +3,7 @@
 # FIXED: JSON serialization error for numpy bool_ and numpy dtypes
 # ENHANCED: Shows original features for samples
 
-from flask import Blueprint, request, jsonify
+from flask import Blueprint, request, jsonify, send_file
 from flask_cors import cross_origin
 import logging
 import numpy as np
@@ -35,7 +35,8 @@ state = {
     'signals': None,
     'corruption_threshold': 0.5,
     'preprocessor': None,
-    'feature_names': None
+    'feature_names': None,
+    'export_history': []
 }
 
 # ========================================================================
@@ -95,6 +96,41 @@ def get_status():
         logger.error(f"Status check error: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
+@api_bp.route('/session', methods=['GET'])
+@cross_origin()
+def get_session():
+    """Retrieve full backend session state to restore frontend"""
+    try:
+        data_loaded = state['data_engine'] is not None
+        model_trained = state['model_trainer'] is not None
+
+        return jsonify({
+            'dataUploaded': data_loaded,
+            'uploadedFilename': getattr(state['data_engine'], 'source_filename', 'dataset.csv') if data_loaded else None,
+            'targetSet': bool(state['data_engine'].target_column) if data_loaded else False,
+            'targetColumn': state['data_engine'].target_column if data_loaded else None,
+            'problemType': state['data_engine'].problem_type if data_loaded else None,
+            'modelTrained': model_trained,
+        }), 200
+    except Exception as e:
+        logger.error(f"Session fetch error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/reset', methods=['POST'])
+@cross_origin()
+def reset_session():
+    """Reset all global state to start fresh"""
+    try:
+        state['data_engine'] = None
+        state['model_trainer'] = None
+        state['signals'] = None
+        state['preprocessor'] = None
+        state['feature_names'] = None
+        state['export_history'] = []
+        return jsonify({'success': True}), 200
+    except Exception as e:
+        logger.error(f"Reset error: {str(e)}")
+        return jsonify({'error': str(e)}), 500
 
 # ========================================================================
 # DATA MANAGEMENT ENDPOINTS
@@ -634,6 +670,170 @@ def get_metrics():
     
     except Exception as e:
         logger.error(f"Metrics error: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+# ========================================================================
+# REPORTS & EXPORT ENDPOINTS
+# ========================================================================
+
+@api_bp.route('/reports/stats', methods=['GET'])
+@cross_origin()
+def get_report_stats():
+    """Get report statistics — real counts from loaded data"""
+    try:
+        result = {
+            'total_exports': len(state.get('export_history', [])),
+            'total_samples': 0,
+            'clean_samples': 0,
+            'flagged_samples': 0,
+            'data_loaded': state['data_engine'] is not None,
+        }
+
+        if state['data_engine'] is not None:
+            X, y = state['data_engine'].preprocess_data()
+            result['total_samples'] = int(len(X))
+
+            if (state.get('model_trainer') is not None
+                    and state.get('signals') is not None
+                    and state['model_trainer'].meta_model is not None):
+                corruption_proba = state['model_trainer'].predict_corruption_probability(state['signals'])
+                threshold = state.get('corruption_threshold', 0.5)
+                flagged = int(np.sum(corruption_proba > threshold))
+                result['flagged_samples'] = flagged
+                result['clean_samples'] = int(len(X) - flagged)
+            else:
+                result['clean_samples'] = int(len(X))
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        logger.error(f"Report stats error: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/reports/export', methods=['POST'])
+@cross_origin()
+def export_data():
+    """Generate a real export file (CSV, JSON, or TXT report)"""
+    try:
+        if state['data_engine'] is None:
+            return jsonify({'error': 'No data loaded. Upload CSV first.'}), 400
+
+        data = request.get_json()
+        fmt = data.get('format', 'csv')
+        include_probs = data.get('include_probabilities', True)
+        only_suspicious = data.get('only_suspicious', False)
+
+        # Work on a copy of the raw data
+        export_df = state['data_engine'].raw_df.copy()
+
+        # Attach corruption probabilities when available
+        has_probs = False
+        if (include_probs
+                and state.get('model_trainer') is not None
+                and state.get('signals') is not None
+                and state['model_trainer'].meta_model is not None):
+            corruption_proba = state['model_trainer'].predict_corruption_probability(state['signals'])
+            if len(corruption_proba) == len(export_df):
+                export_df['corruption_probability'] = corruption_proba
+                has_probs = True
+
+        # Filter to suspicious only
+        if only_suspicious and has_probs:
+            threshold = state.get('corruption_threshold', 0.5)
+            export_df = export_df[export_df['corruption_probability'] > threshold]
+
+        # Prepare exports directory
+        export_dir = DATA_DIR / 'exports'
+        export_dir.mkdir(exist_ok=True)
+        timestamp = pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')
+
+        if fmt == 'csv':
+            filename = f'export_{timestamp}.csv'
+            filepath = export_dir / filename
+            export_df.to_csv(filepath, index=False)
+        elif fmt == 'json':
+            filename = f'export_{timestamp}.json'
+            filepath = export_dir / filename
+            export_df.to_json(filepath, orient='records', indent=2)
+        elif fmt == 'pdf':
+            # Generate a text-based compliance report
+            filename = f'compliance_report_{timestamp}.txt'
+            filepath = export_dir / filename
+            col_list = ", ".join(export_df.columns.tolist())
+            target_col = state['data_engine'].target_column
+            problem_type = state['data_engine'].problem_type
+            with open(filepath, 'w') as f:
+                f.write("SLDCE PRO -- Data Quality Compliance Report\n")
+                f.write(f"Generated: {pd.Timestamp.now().isoformat()}\n")
+                f.write("=" * 56 + "\n\n")
+                f.write(f"Dataset Shape   : {export_df.shape[0]} rows x {export_df.shape[1]} columns\n")
+                f.write(f"Columns         : {col_list}\n")
+                if target_col:
+                    f.write(f"Target Column   : {target_col}\n")
+                    f.write(f"Problem Type    : {problem_type}\n")
+                f.write("\n--- Descriptive Statistics ---\n\n")
+                f.write(export_df.describe(include='all').to_string())
+                f.write('\n')
+        else:
+            return jsonify({'error': f'Unsupported format: {fmt}'}), 400
+
+        # Record in history
+        record = {
+            'filename': filename,
+            'format': fmt,
+            'rows': int(len(export_df)),
+            'timestamp': pd.Timestamp.now().isoformat(),
+            'include_probabilities': bool(include_probs),
+            'only_suspicious': bool(only_suspicious),
+        }
+        state['export_history'].insert(0, record)
+
+        logger.info(f"✅ Export generated: {filename} ({len(export_df)} rows)")
+
+        return jsonify({
+            'success': True,
+            'filename': filename,
+            'format': fmt,
+            'rows_exported': int(len(export_df)),
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Export error: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Export failed: {str(e)}'}), 500
+
+
+@api_bp.route('/reports/recent', methods=['GET'])
+@cross_origin()
+def get_recent_exports():
+    """Get recent export history"""
+    try:
+        history = state.get('export_history', [])
+        return jsonify({
+            'exports': history[:20],
+            'total_exports': len(history),
+        }), 200
+    except Exception as e:
+        logger.error(f"Recent exports error: {str(e)}", exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/reports/download/<filename>', methods=['GET'])
+@cross_origin()
+def download_export(filename):
+    """Download an exported file"""
+    try:
+        export_dir = DATA_DIR / 'exports'
+        filepath = export_dir / filename
+
+        if not filepath.exists():
+            return jsonify({'error': 'File not found'}), 404
+
+        return send_file(str(filepath.resolve()), as_attachment=True,
+                         download_name=filename)
+    except Exception as e:
+        logger.error(f"Download error: {str(e)}", exc_info=True)
         return jsonify({'error': str(e)}), 500
 
 

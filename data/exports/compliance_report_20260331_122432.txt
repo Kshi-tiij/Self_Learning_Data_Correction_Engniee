@@ -1,0 +1,23 @@
+SLDCE PRO -- Data Quality Compliance Report
+Generated: 2026-03-31T12:24:32.693235
+========================================================
+
+Dataset Shape   : 32561 rows x 15 columns
+Columns         : age, workclass, fnlwgt, education, education.num, marital.status, occupation, relationship, race, sex, capital.gain, capital.loss, hours.per.week, native.country, income
+Target Column   : age
+Problem Type    : regression
+
+--- Descriptive Statistics ---
+
+                 age workclass        fnlwgt education  education.num      marital.status      occupation relationship   race    sex  capital.gain  capital.loss  hours.per.week native.country income
+count   32561.000000     32561  3.256100e+04     32561   32561.000000               32561           32561        32561  32561  32561  32561.000000  32561.000000    32561.000000          32561  32561
+unique           NaN         9           NaN        16            NaN                   7              15            6      5      2           NaN           NaN             NaN             42      2
+top              NaN   Private           NaN   HS-grad            NaN  Married-civ-spouse  Prof-specialty      Husband  White   Male           NaN           NaN             NaN  United-States  <=50K
+freq             NaN     22696           NaN     10501            NaN               14976            4140        13193  27816  21790           NaN           NaN             NaN          29170  24720
+mean       38.581647       NaN  1.897784e+05       NaN      10.080679                 NaN             NaN          NaN    NaN    NaN   1077.648844     87.303830       40.437456            NaN    NaN
+std        13.640433       NaN  1.055500e+05       NaN       2.572720                 NaN             NaN          NaN    NaN    NaN   7385.292085    402.960219       12.347429            NaN    NaN
+min        17.000000       NaN  1.228500e+04       NaN       1.000000                 NaN             NaN          NaN    NaN    NaN      0.000000      0.000000        1.000000            NaN    NaN
+25%        28.000000       NaN  1.178270e+05       NaN       9.000000                 NaN             NaN          NaN    NaN    NaN      0.000000      0.000000       40.000000            NaN    NaN
+50%        37.000000       NaN  1.783560e+05       NaN      10.000000                 NaN             NaN          NaN    NaN    NaN      0.000000      0.000000       40.000000            NaN    NaN
+75%        48.000000       NaN  2.370510e+05       NaN      12.000000                 NaN             NaN          NaN    NaN    NaN      0.000000      0.000000       45.000000            NaN    NaN
+max        90.000000       NaN  1.484705e+06       NaN      16.000000                 NaN             NaN          NaN    NaN    NaN  99999.000000   4356.000000       99.000000            NaN    NaN
